@@ -1,0 +1,73 @@
+pipeline {
+    agent any
+
+    environment {
+        DEPLOY_DIR = "${WORKSPACE}/python-app-deploy"
+    }
+
+    stages {
+        stage('Build') {
+            steps {
+                echo 'Installing dependencies...'
+                sh '''
+                python3 -m pip install --break-system-packages -r requirements.txt || python3 -m pip install -r requirements.txt
+                '''
+            }
+        }
+
+        stage('Test') {
+            steps {
+                echo 'Running unit tests...'
+                sh 'python3 -m unittest discover -s .'
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                echo 'Deploying application to local target directory...'
+                sh '''
+                mkdir -p ${DEPLOY_DIR}
+                cp app.py ${DEPLOY_DIR}/
+                '''
+            }
+        }
+
+        stage('Run Application') {
+            steps {
+                echo 'Starting application in background...'
+                sh '''
+                nohup python3 ${DEPLOY_DIR}/app.py > ${DEPLOY_DIR}/app.log 2>&1 &
+                echo $! > ${DEPLOY_DIR}/app.pid
+                sleep 2
+                '''
+            }
+        }
+
+        stage('Test Deployed App') {
+            steps {
+                echo 'Testing deployed application endpoint...'
+                sh '''
+                python3 test_app.py
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Cleaning up running processes...'
+            sh '''
+            if [ -f ${DEPLOY_DIR}/app.pid ]; then
+                kill $(cat ${DEPLOY_DIR}/app.pid) || true
+                rm -f ${DEPLOY_DIR}/app.pid
+            fi
+            '''
+        }
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed. Check Jenkins console log for details.'
+        }
+    }
+}
